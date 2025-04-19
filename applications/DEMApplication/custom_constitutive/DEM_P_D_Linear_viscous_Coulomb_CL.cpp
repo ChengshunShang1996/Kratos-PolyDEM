@@ -116,7 +116,6 @@ namespace Kratos {
 
         // The unit vector from element 1 to the contact point
         Vector3 unitCPVect = OverlapVector.Normalised();
-        KRATOS_INFO("unitCPVect 2: ") << unitCPVect << std::endl;
 
         // normal and tangential components of the relative velocity at the contact point
         Vector3 relVel_n = unitCPVect * Vector3::Dot(unitCPVect, relVel);
