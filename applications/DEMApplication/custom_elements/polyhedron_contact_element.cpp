@@ -170,9 +170,6 @@ void PolyhedronContactElement::CalculateRightHandSide(const ProcessInfo& r_proce
 		total_moment_2[1] += contact_moment_2[1];
 		total_moment_2[2] += contact_moment_2[2];
 
-		KRATOS_INFO("Contact Force 1") << contact_forces_1 << std::endl;
-		KRATOS_INFO("Contact Force 2") << contact_forces_2 << std::endl;
-
 		/*
 		total_forces[0] = contact_force[0] + additional_forces[0];
 		total_forces[1] = contact_force[1] + additional_forces[1];
