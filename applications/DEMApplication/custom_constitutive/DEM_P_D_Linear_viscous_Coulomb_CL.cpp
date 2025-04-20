@@ -191,6 +191,11 @@ namespace Kratos {
             }
         }
 
+        KRATOS_INFO("DEM") << "F_n: " << F_n << std::endl;
+        KRATOS_INFO("DEM") << "F_nd: " << F_nd << std::endl;
+        KRATOS_INFO("DEM") << "F_t: " << F_t << std::endl;
+        KRATOS_INFO("DEM") << "F_td: " << F_td << std::endl << std::endl;
+
         contact_force = F_n + F_nd + F_t + F_td;
 
         KRATOS_CATCH( "" )

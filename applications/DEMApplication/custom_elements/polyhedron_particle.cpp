@@ -132,6 +132,19 @@ namespace Kratos {
             UseInputMomentOfInertia();
         }
 
+        array_1d<double, 3> angular_velocity = central_node.FastGetSolutionStepValue(ANGULAR_VELOCITY);
+        array_1d<double, 3> angular_momentum;
+        double LocalTensor[3][3];
+        double GlobalTensor[3][3];
+        GeometryFunctions::ConstructLocalTensor(base_principal_moments_of_inertia, LocalTensor);
+        GeometryFunctions::QuaternionTensorLocal2Global(Orientation, LocalTensor, GlobalTensor);
+        GeometryFunctions::ProductMatrix3X3Vector3X1(GlobalTensor, angular_velocity, angular_momentum);
+        noalias(central_node.FastGetSolutionStepValue(ANGULAR_MOMENTUM)) = angular_momentum;
+
+        array_1d<double, 3> local_angular_velocity;
+        GeometryFunctions::QuaternionVectorGlobal2Local(Orientation, angular_velocity, local_angular_velocity);
+        noalias(central_node.FastGetSolutionStepValue(LOCAL_ANGULAR_VELOCITY)) = local_angular_velocity;
+
         KRATOS_CATCH("")
     }
 
@@ -457,6 +470,9 @@ namespace Kratos {
 
         auto& central_node = GetGeometry()[0];
         central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA) = mCurrentInertia;
+
+        KRATOS_INFO("DEM") << "Using input moment of inertia: " << mCurrentInertia[0] << " " << mCurrentInertia[1] << " " << mCurrentInertia[2] << std::endl;
+        KRATOS_INFO("DEM") << "Using input moment of inertia: " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[0] << " " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[1] << " " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[2] << std::endl;
 
         KRATOS_CATCH("")
     }
