@@ -224,9 +224,14 @@ namespace Kratos {
                 }
             }
             
-            if (is_in_dem_wall_sub_model_part && mRigidBodyMotionForPolyWall){
-                mListOfPolyhedronParticles[i]->InitializeFromFEM(r_process_info, fem_model_part);
-            } else{
+            if (is_in_dem_wall_sub_model_part){
+                if (mRigidBodyMotionForPolyWall) {
+                    mListOfPolyhedronParticles[i]->InitializeFromFEM(r_process_info, fem_model_part);
+                } else {
+                    mListOfPolyhedronParticles[i]->Initialize(r_process_info);
+                    mListOfPolyhedronParticles[i]->mIsBelongingToDEMWall = true; // This is a DEM wall
+                }
+            } else {
                 mListOfPolyhedronParticles[i]->Initialize(r_process_info);
             }
         
