@@ -133,7 +133,21 @@ namespace Kratos {
         const double my_mass    = PolyhedronParticle1->GetMass();
         const double other_mass = PolyhedronParticle2->GetMass();
 
-        const double equiv_mass = 1.0 / (1.0/my_mass + 1.0/other_mass);
+        double equiv_mass = 0.0;
+        //TODO: check it when we don't use FEM part as input
+        if (PolyhedronParticle1->mIsBelongingToDEMWall || PolyhedronParticle2->mIsBelongingToDEMWall) {
+            if (PolyhedronParticle1->mIsBelongingToDEMWall && !PolyhedronParticle2->mIsBelongingToDEMWall) {
+                equiv_mass = other_mass;
+            }
+            else if (!PolyhedronParticle1->mIsBelongingToDEMWall && PolyhedronParticle2->mIsBelongingToDEMWall) {
+                equiv_mass = my_mass;
+            }
+            else {
+                equiv_mass = 1.0 / (1.0/my_mass + 1.0/other_mass);
+            }
+        } else {
+            equiv_mass = 1.0 / (1.0/my_mass + 1.0/other_mass);
+        }
 
         Properties& properties_of_this_contact = PolyhedronParticle1->GetProperties().GetSubProperties(PolyhedronParticle2->GetProperties().Id());
         const double damping_gamma = properties_of_this_contact[DAMPING_GAMMA];
