@@ -132,6 +132,10 @@ namespace Kratos {
             UseInputMomentOfInertia();
         }
 
+        array_1d<double, 3> base_principal_moments_of_inertia = central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA);
+        Quaternion<double>& Orientation = central_node.FastGetSolutionStepValue(ORIENTATION);
+        Orientation.normalize();
+        
         array_1d<double, 3> angular_velocity = central_node.FastGetSolutionStepValue(ANGULAR_VELOCITY);
         array_1d<double, 3> angular_momentum;
         double LocalTensor[3][3];
