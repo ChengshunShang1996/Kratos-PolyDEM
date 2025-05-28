@@ -639,7 +639,7 @@ class Procedures():
         rigid_face_model_part.SetBufferSize(rigid_b_size)
         polyhedron_model_part.SetBufferSize(polyhedron_b_size)
 
-    def FindMaxNodeIdAccrossModelParts(self, creator_destructor, all_model_parts):
+    def FindMaxNodeIdAcrossModelParts(self, creator_destructor, all_model_parts):
 
         max_candidates = []
         max_candidates.append(creator_destructor.FindMaxNodeIdInModelPart(all_model_parts.Get("SpheresPart")))
