@@ -79,24 +79,27 @@ namespace Kratos {
 	    KRATOS_ERROR_IF_NOT(GetProperties().Has(POLYHEDRON_INFORMATION))<<"Something went wrong. Properties do not contain POLYHEDRON_INFORMATION.";
         const PolyhedronInformation& poly_info = GetProperties()[POLYHEDRON_INFORMATION];
         const int poly_shape_index = central_node.GetSolutionStepValue(POLYHEDRON_SHAPE_INDEX);
-        const std::vector<array_1d<double,3> >& reference_list_of_vertices = poly_info.mListOfVerticesList[poly_shape_index];
+        const std::vector<array_1d<double,3>>& reference_list_of_vertices = poly_info.mListOfVerticesList[poly_shape_index];
         const std::vector<std::vector<int>>& reference_list_of_faces = poly_info.mListOfFacesList[poly_shape_index];
         const double reference_size = poly_info.mListOfSize[poly_shape_index];
         const double reference_volume = poly_info.mListOfVolume[poly_shape_index];
+        const array_1d<double,3>& reference_inertia_per_unit_mass = poly_info.mListOfInertiaPerUnitMass[poly_shape_index];
 
         const unsigned int number_of_vertices = reference_list_of_vertices.size();
 
-        mListOfVertices.resize(number_of_vertices);
+        mListOfVerticesLocal.resize(number_of_vertices);
+        mListOfVerticesGlobal.resize(number_of_vertices);
 
         const double scaling_factor = (mRadius * 2.0) / reference_size;
 
         for (int i = 0; i < (int)number_of_vertices; i++) {
-            mListOfVertices[i][0] = scaling_factor * reference_list_of_vertices[i][0];
-            mListOfVertices[i][1] = scaling_factor * reference_list_of_vertices[i][1];
-            mListOfVertices[i][2] = scaling_factor * reference_list_of_vertices[i][2];
+            mListOfVerticesLocal[i][0] = scaling_factor * reference_list_of_vertices[i][0];
+            mListOfVerticesLocal[i][1] = scaling_factor * reference_list_of_vertices[i][1];
+            mListOfVerticesLocal[i][2] = scaling_factor * reference_list_of_vertices[i][2];
         }
 
-        InitializeVerticesDueToRotation();
+        //InitializeVerticesDueToRotation();
+        UpdateListOfVerticesGlobal();
 
         const unsigned int number_of_faces = reference_list_of_faces.size();
 
@@ -121,7 +124,30 @@ namespace Kratos {
 
         //SetMass(GetDensity() * CalculateVolume());
         SetMass(polyhedron_mass);
-        SetMomentOfInertia();
+
+        if (reference_inertia_per_unit_mass[0] == 0.0 && reference_inertia_per_unit_mass[1] == 0.0 && reference_inertia_per_unit_mass[2] == 0.0) {
+            SetMomentOfInertia();
+        } else {
+            mCurrentInertia = reference_inertia_per_unit_mass * polyhedron_mass;
+            UseInputMomentOfInertia();
+        }
+
+        array_1d<double, 3> base_principal_moments_of_inertia = central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA);
+        Quaternion<double>& Orientation = central_node.FastGetSolutionStepValue(ORIENTATION);
+        Orientation.normalize();
+        
+        array_1d<double, 3> angular_velocity = central_node.FastGetSolutionStepValue(ANGULAR_VELOCITY);
+        array_1d<double, 3> angular_momentum;
+        double LocalTensor[3][3];
+        double GlobalTensor[3][3];
+        GeometryFunctions::ConstructLocalTensor(base_principal_moments_of_inertia, LocalTensor);
+        GeometryFunctions::QuaternionTensorLocal2Global(Orientation, LocalTensor, GlobalTensor);
+        GeometryFunctions::ProductMatrix3X3Vector3X1(GlobalTensor, angular_velocity, angular_momentum);
+        noalias(central_node.FastGetSolutionStepValue(ANGULAR_MOMENTUM)) = angular_momentum;
+
+        array_1d<double, 3> local_angular_velocity;
+        GeometryFunctions::QuaternionVectorGlobal2Local(Orientation, angular_velocity, local_angular_velocity);
+        noalias(central_node.FastGetSolutionStepValue(LOCAL_ANGULAR_VELOCITY)) = local_angular_velocity;
 
         KRATOS_CATCH("")
     }
@@ -158,24 +184,25 @@ namespace Kratos {
         const unsigned int number_of_vertices = first_condition->GetGeometry().size(); 
         const unsigned int number_of_face_vertices = number_of_vertices; // = first_condition.GetGeometry().size()
 
-        mListOfVertices.resize(number_of_vertices);
+        mListOfVerticesLocal.resize(number_of_vertices);
+        mListOfVerticesGlobal.resize(number_of_vertices);
 
         // Ensure the condition has the same id as this polyhedron particle
         for (auto it = r_fem_model_part.GetSubModelPart("SurfaceForPolyWall").ConditionsBegin(); 
              it != r_fem_model_part.GetSubModelPart("SurfaceForPolyWall").ConditionsEnd(); ++it) {
             if (it->Id() == this->Id()) {
                 for (int i = 0; i < (int)number_of_vertices; i++) {
-                    mListOfVertices[i][0] = it->GetGeometry()[i].Coordinates()[0];
-                    mListOfVertices[i][1] = it->GetGeometry()[i].Coordinates()[1];
-                    mListOfVertices[i][2] = it->GetGeometry()[i].Coordinates()[2];
+                    mListOfVerticesLocal[i][0] = it->GetGeometry()[i].Coordinates()[0];
+                    mListOfVerticesLocal[i][1] = it->GetGeometry()[i].Coordinates()[1];
+                    mListOfVerticesLocal[i][2] = it->GetGeometry()[i].Coordinates()[2];
                 }
 
                 array_1d<double, 3> center = it->GetGeometry().Center();
 
-                for (int i = 0; i < (int)mListOfVertices.size(); i++) {
-                    mListOfVertices[i][0] -= center[0];
-                    mListOfVertices[i][1] -= center[1];
-                    mListOfVertices[i][2] -= center[2];
+                for (int i = 0; i < (int)mListOfVerticesLocal.size(); i++) {
+                    mListOfVerticesLocal[i][0] -= center[0];
+                    mListOfVerticesLocal[i][1] -= center[1];
+                    mListOfVerticesLocal[i][2] -= center[2];
                 }
 
                 for (int i = 0; i < 3; i++) {
@@ -185,6 +212,8 @@ namespace Kratos {
                 break;
             }
         }
+
+        UpdateListOfVerticesGlobal();
 
         //TODO:limited to surface
         const unsigned int number_of_faces = 1;
@@ -225,7 +254,7 @@ namespace Kratos {
         auto& central_node = GetGeometry()[0];
         mRadius = central_node.FastGetSolutionStepValue(RADIUS); //Just in case someone is overwriting the radius in Python
 
-        SetMomentOfInertia();
+        UpdateListOfVerticesGlobal();
 
         KRATOS_CATCH("")
     }
@@ -240,19 +269,21 @@ namespace Kratos {
         for (auto it = r_fem_model_part.GetSubModelPart("SurfaceForPolyWall").ConditionsBegin(); 
              it != r_fem_model_part.GetSubModelPart("SurfaceForPolyWall").ConditionsEnd(); ++it) {
             if (it->Id() == this->Id()) {
-                for (int i = 0; i < (int)mListOfVertices.size(); i++) {
-                    mListOfVertices[i][0] = it->GetGeometry()[i].Coordinates()[0];
-                    mListOfVertices[i][1] = it->GetGeometry()[i].Coordinates()[1];
-                    mListOfVertices[i][2] = it->GetGeometry()[i].Coordinates()[2];
+                for (int i = 0; i < (int)mListOfVerticesLocal.size(); i++) {
+                    mListOfVerticesLocal[i][0] = it->GetGeometry()[i].Coordinates()[0];
+                    mListOfVerticesLocal[i][1] = it->GetGeometry()[i].Coordinates()[1];
+                    mListOfVerticesLocal[i][2] = it->GetGeometry()[i].Coordinates()[2];
                 }
                 
                 array_1d<double, 3> center = it->GetGeometry().Center();
 
-                for (int i = 0; i < (int)mListOfVertices.size(); i++) {
-                    mListOfVertices[i][0] -= center[0];
-                    mListOfVertices[i][1] -= center[1];
-                    mListOfVertices[i][2] -= center[2];
+                for (int i = 0; i < (int)mListOfVerticesLocal.size(); i++) {
+                    mListOfVerticesLocal[i][0] -= center[0];
+                    mListOfVerticesLocal[i][1] -= center[1];
+                    mListOfVerticesLocal[i][2] -= center[2];
                 }
+
+                UpdateListOfVerticesGlobal();
 
                 for (int i = 0; i < 3; i++) {
                     central_node[i] = center[i];
@@ -383,8 +414,8 @@ namespace Kratos {
         double max_distance = -1e20;
         auto& central_node = GetGeometry()[0];
         Vector3 max_point;
-        for (int i = 0; i < mListOfVertices.size(); ++i) {
-            Vector3 vertex_point(mListOfVertices[i][0] + central_node[0], mListOfVertices[i][1] + central_node[1], mListOfVertices[i][2] + central_node[2]);
+        for (int i = 0; i < mListOfVerticesGlobal.size(); ++i) {
+            Vector3 vertex_point(mListOfVerticesGlobal[i][0] + central_node[0], mListOfVerticesGlobal[i][1] + central_node[1], mListOfVerticesGlobal[i][2] + central_node[2]);
             double distance = Vector3::Dot(vertex_point, direction);
             if (distance > max_distance){
                 max_distance = distance;
@@ -401,7 +432,7 @@ namespace Kratos {
         KRATOS_TRY
 
         auto& central_node = GetGeometry()[0];
-        const unsigned int number_of_vertices = mListOfVertices.size();
+        const unsigned int number_of_vertices = mListOfVerticesGlobal.size();
         double mass_per_vertex = mRealMass / number_of_vertices;
         Matrix this_moment_of_inertia(3, 3, 0.0);
         double this_identify[3][3] = {
@@ -412,7 +443,7 @@ namespace Kratos {
 
         for (int i = 0; i < (int)number_of_vertices; i++) {
             
-            double v_dot_v = GeometryFunctions::DotProduct(mListOfVertices[i], mListOfVertices[i]);
+            double v_dot_v = GeometryFunctions::DotProduct(mListOfVerticesGlobal[i], mListOfVerticesGlobal[i]);
             double v_dot_v_identity[3][3];
             for (int j = 0; j < 3; ++j) {
                 for (int k = 0; k < 3; ++k) {
@@ -420,7 +451,7 @@ namespace Kratos {
                 }
             }
             double v_outer_v[3][3];
-            GeometryFunctions::OuterProduct(mListOfVertices[i], mListOfVertices[i], v_outer_v);
+            GeometryFunctions::OuterProduct(mListOfVerticesGlobal[i], mListOfVerticesGlobal[i], v_outer_v);
 
             std::vector<std::vector<double>> result(3, std::vector<double>(3));
             for (int m = 0; m < 3; ++m) {
@@ -430,10 +461,48 @@ namespace Kratos {
             }
         }
 
-        central_node.FastGetSolutionStepValue(POLYHEDRON_MOMENT_OF_INERTIA) = this_moment_of_inertia;
+        central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[0] = this_moment_of_inertia(0,0);
+        central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[1] = this_moment_of_inertia(1,1);
+        central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[2] = this_moment_of_inertia(2,2);
 
         KRATOS_CATCH("")
     }
+
+    void PolyhedronParticle::UseInputMomentOfInertia(){
+
+        KRATOS_TRY
+
+        auto& central_node = GetGeometry()[0];
+        central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA) = mCurrentInertia;
+
+        KRATOS_INFO("DEM") << "Using input moment of inertia: " << mCurrentInertia[0] << " " << mCurrentInertia[1] << " " << mCurrentInertia[2] << std::endl;
+        KRATOS_INFO("DEM") << "Using input moment of inertia: " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[0] << " " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[1] << " " << central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA)[2] << std::endl;
+
+        KRATOS_CATCH("")
+    }
+
+    /*
+    void PolyhedronParticle::UpdateCurrentInertia(){
+        
+        KRATOS_TRY
+
+        
+        auto& central_node = GetGeometry()[0];
+        array_1d<double, 3>& delta_rotation = central_node.FastGetSolutionStepValue(DELTA_ROTATION);
+        double modulus_square = delta_rotation[0]*delta_rotation[0] + delta_rotation[1]*delta_rotation[1] + delta_rotation[2]*delta_rotation[2];
+        if (modulus_square != 0.0){   
+            Quaternion<double> rotation_quaternion = Quaternion<double>::FromRotationVector(delta_rotation);
+            Matrix rotation_matrix(3, 3, 0.0);
+            rotation_quaternion.ToRotationMatrix(rotation_matrix);
+            Matrix inertia_matrix = central_node.FastGetSolutionStepValue(PRINCIPAL_MOMENTS_OF_INERTIA);
+            Matrix inertia_matrix_rotated(3, 3, 0.0);
+            GeometryFunctions::ProductMatrices3X3(rotation_matrix, inertia_matrix, inertia_matrix_rotated);
+            mCurrentInertia[0] = inertia_matrix_rotated(0, 0);
+            mCurrentInertia[1] = inertia_matrix_rotated(1, 1);
+            mCurrentInertia[2] = inertia_matrix_rotated(2, 2);
+        }
+        KRATOS_CATCH("")
+    }*/
 
     void PolyhedronParticle::Move(const double delta_t, const bool rotation_option, const double force_reduction_factor, const int StepFlag) {
         KRATOS_TRY
@@ -446,6 +515,7 @@ namespace Kratos {
         KRATOS_CATCH("")
     }
 
+    /*
     void PolyhedronParticle::UpdateVerticesDueToRotation(){
         auto& central_node = GetGeometry()[0];
         array_1d<double, 3>& delta_rotation = central_node.FastGetSolutionStepValue(DELTA_ROTATION);
@@ -460,8 +530,9 @@ namespace Kratos {
                 mListOfVertices[k] = tempVector;
             }
         }
-    }
+    }*/
 
+    /*
     void PolyhedronParticle::InitializeVerticesDueToRotation(){
         auto& central_node = GetGeometry()[0];
         array_1d<double, 3>& delta_rotation = central_node.FastGetSolutionStepValue(INITIAL_ROTATION_VECTOR);
@@ -476,6 +547,16 @@ namespace Kratos {
                 rotation_quaternion.RotateVector3(mListOfVertices[k]);
             }
 
+        }
+    }*/
+
+    void PolyhedronParticle::UpdateListOfVerticesGlobal(){
+        auto& central_node = GetGeometry()[0];
+        Quaternion<double>& Orientation = central_node.FastGetSolutionStepValue(ORIENTATION);
+        array_1d<double, 3> global_rel_coord;
+        for (int i = 0; i < mListOfVerticesLocal.size(); ++i) {
+            GeometryFunctions::QuaternionVectorLocal2Global(Orientation, mListOfVerticesLocal[i], global_rel_coord);
+            noalias(mListOfVerticesGlobal[i]) = global_rel_coord;
         }
     }
 
@@ -501,9 +582,9 @@ namespace Kratos {
 
                     for (int j = 0; j < face.size(); ++j) {
                         Vector3 vertexPoint = {
-                            mListOfVertices[face[j]][0] + central_node[0],
-                            mListOfVertices[face[j]][1] + central_node[1],
-                            mListOfVertices[face[j]][2] + central_node[2]};
+                            mListOfVerticesGlobal[face[j]][0] + central_node[0],
+                            mListOfVerticesGlobal[face[j]][1] + central_node[1],
+                            mListOfVerticesGlobal[face[j]][2] + central_node[2]};
                         bestFaceVertices.push_back(vertexPoint);
                     }
                 }
@@ -515,18 +596,18 @@ namespace Kratos {
                 const auto& defaultFace = mListOfFaces[0];
                 for (int j = 0; j < defaultFace.size(); ++j) {
                     Vector3 vertexPoint = {
-                        mListOfVertices[defaultFace[j]][0] + central_node[0],
-                        mListOfVertices[defaultFace[j]][1] + central_node[1],
-                        mListOfVertices[defaultFace[j]][2] + central_node[2]};
+                        mListOfVerticesGlobal[defaultFace[j]][0] + central_node[0],
+                        mListOfVerticesGlobal[defaultFace[j]][1] + central_node[1],
+                        mListOfVerticesGlobal[defaultFace[j]][2] + central_node[2]};
                     bestFaceVertices.push_back(vertexPoint);
                 }
             } else {
                 const auto& defaultFace = mListOfFaces[0];
                 for (int j = 0; j < defaultFace.size(); ++j) {
                     Vector3 vertexPoint = {
-                        mListOfVertices[defaultFace[j]][0] + central_node[0],
-                        mListOfVertices[defaultFace[j]][1] + central_node[1],
-                        mListOfVertices[defaultFace[j]][2] + central_node[2]};
+                        mListOfVerticesGlobal[defaultFace[j]][0] + central_node[0],
+                        mListOfVerticesGlobal[defaultFace[j]][1] + central_node[1],
+                        mListOfVerticesGlobal[defaultFace[j]][2] + central_node[2]};
                     bestFaceVertices.push_back(vertexPoint);
                 }
                 find_face = false;
@@ -545,7 +626,7 @@ namespace Kratos {
 
         auto& central_node = GetGeometry()[0];
         // Check if the point is on the plane of the face
-        Vector3 facePoint = {mListOfVertices[face[0]][0] + central_node[0], mListOfVertices[face[0]][1] + central_node[1], mListOfVertices[face[0]][2] + central_node[2]};
+        Vector3 facePoint = {mListOfVerticesGlobal[face[0]][0] + central_node[0], mListOfVerticesGlobal[face[0]][1] + central_node[1], mListOfVerticesGlobal[face[0]][2] + central_node[2]};
         double distance = Vector3::Dot(normal, point - facePoint);
         const double epsilon = 1e-6; // Tolerance for floating-point comparison
         if (std::abs(distance) > epsilon) {
@@ -573,9 +654,13 @@ namespace Kratos {
 
         // Calculate the normal using the cross product of two edges of the face
         Vector3 normal;
-        Vector3 edge1 = {mListOfVertices[face[1]][0] - mListOfVertices[face[0]][0], mListOfVertices[face[1]][1] - mListOfVertices[face[0]][1], mListOfVertices[face[1]][2] - mListOfVertices[face[0]][2]};
+        Vector3 edge1 = {mListOfVerticesGlobal[face[1]][0] - mListOfVerticesGlobal[face[0]][0], 
+                        mListOfVerticesGlobal[face[1]][1] - mListOfVerticesGlobal[face[0]][1], 
+                        mListOfVerticesGlobal[face[1]][2] - mListOfVerticesGlobal[face[0]][2]};
         for (size_t i = 0; i < face.size() - 2; ++i) {
-            Vector3 edge2 = {mListOfVertices[face[i + 2]][0] - mListOfVertices[face[0]][0], mListOfVertices[face[i + 2]][1] - mListOfVertices[face[0]][1], mListOfVertices[face[i + 2]][2] - mListOfVertices[face[0]][2]};
+            Vector3 edge2 = {mListOfVerticesGlobal[face[i + 2]][0] - mListOfVerticesGlobal[face[0]][0], 
+                            mListOfVerticesGlobal[face[i + 2]][1] - mListOfVerticesGlobal[face[0]][1], 
+                            mListOfVerticesGlobal[face[i + 2]][2] - mListOfVerticesGlobal[face[0]][2]};
             normal = Vector3::Cross(edge1, edge2);
 
             if (normal.Length() > 1e-6) {
@@ -661,7 +746,7 @@ namespace Kratos {
     //double PolyhedronParticle::GetDensity()                                                      { return GetFastProperties()->GetDensity();}
     double PolyhedronParticle::GetDensity()                                                      { return GetProperties()[PARTICLE_DENSITY];}
     double PolyhedronParticle::SlowGetDensity()                                                  { return GetProperties()[PARTICLE_DENSITY];}
-    std::vector<array_1d<double, 3>> PolyhedronParticle::GetListOfVertices()                     { return mListOfVertices;}
+    std::vector<array_1d<double, 3>> PolyhedronParticle::GetListOfVertices()                     { return mListOfVerticesGlobal;}
     std::vector<std::vector<int>> PolyhedronParticle::GetListOfFaces()                           { return mListOfFaces;}
 
     void   PolyhedronParticle::SetYoungFromProperties(double* young)                             { GetFastProperties()->SetYoungFromProperties( young);                                            }
